@@ -9,12 +9,12 @@ Servo bombaServo;
 // --- PINOS ---
 const int botoes[] = {2, 3, 4, 5, 6}; // Níveis 1-5
 const int leds[] = {7, 8, 9, 10, 12};
-const int pinManual = 13; // Botão para modo manual
+const int pinManual = 13; // Botão manual
 
 // --- VARIÁVEIS ---
 float volumeAtual = 0.0;
 float volumeAlvo = 0.0;
-const float capacidadeTanque = 10000.0; // 10 L se 1 unidade = 1 ml
+const float capacidadeTanque = 10000.0;
 
 // Limites
 const float volumeMin = capacidadeTanque * 0.10;
@@ -31,6 +31,12 @@ bool estadoPisca = false;
 float niveis[] = {0.10, 0.30, 0.50, 0.70, 0.90};
 int nivelAtualIndex = 0;
 
+// Último nível válido
+int ultimoNivelValido = 0;
+
+// Direção de movimento
+bool subindo = true; // true = subir, false = descer
+
 // Modo manual
 bool manualAtivo = false;
 bool ultimoEstadoManual = HIGH;
@@ -38,6 +44,20 @@ bool ultimoEstadoManual = HIGH;
 // Mensagem de erro
 bool erroAtivo = false;
 unsigned long tempoErro = 0;
+
+// --- Funções auxiliares ---
+int descobrirNivelAtual(float porcentagem) {
+  for (int i = 0; i < 5; i++) {
+    if (porcentagem <= niveis[i] * 100 + 1) {
+      return i;
+    }
+  }
+  return 4;
+}
+
+float arredondar10(float valor) {
+  return (int)(valor / 10.0) * 10.0;
+}
 
 void setup() {
   lcd.init();
@@ -51,32 +71,43 @@ void setup() {
     pinMode(botoes[i], INPUT_PULLUP);
   }
 
+  // --- Mensagem de erro ao ligar/reiniciar ---
+  lcd.setCursor(0, 0);
+  lcd.print("Inicializando....      ");
+  lcd.setCursor(0, 1);
+  lcd.print("Aguarde!  ");
+  delay(3000);
+  lcd.clear();
+
+  // --- Carrega volume e direção do EEPROM ---
   EEPROM.get(0, volumeAtual);
+  EEPROM.get(4, subindo);
+
   if (isnan(volumeAtual) || volumeAtual < volumeMin) volumeAtual = volumeMin;
   if (volumeAtual > volumeMax) volumeAtual = volumeMax;
 
-  volumeAlvo = volumeAtual;
-}
+  // Descobre o nível atual baseado no volumeAtual
+  nivelAtualIndex = descobrirNivelAtual((volumeAtual / capacidadeTanque) * 100);
+  ultimoNivelValido = nivelAtualIndex;
 
-// --- DESCOBRE EM QUAL NÍVEL ESTÁ ---
-int descobrirNivelAtual(float porcentagem) {
-  for (int i = 0; i < 5; i++) {
-    if (porcentagem <= niveis[i] * 100 + 1) {
-      return i;
-    }
+  // --- Define volumeAlvo de acordo com a direção ---
+  if (subindo) {
+    volumeAlvo = capacidadeTanque * niveis[ultimoNivelValido];
+  } else {
+    float baseNivel = (ultimoNivelValido == 0) ? volumeMin : capacidadeTanque * niveis[ultimoNivelValido - 1];
+    volumeAlvo = max(baseNivel, volumeMin);
   }
-  return 4;
 }
 
 void loop() {
 
-  // --- PISCA ---
+  // --- Pisca ---
   if (millis() - tempoPisca > 300) {
     tempoPisca = millis();
     estadoPisca = !estadoPisca;
   }
 
-  // --- BOTÃO MANUAL (debounce simples) ---
+  // --- Botão manual ---
   bool estadoBotaoManual = digitalRead(pinManual);
   if (estadoBotaoManual == LOW && ultimoEstadoManual == HIGH) {
     manualAtivo = !manualAtivo;
@@ -86,66 +117,70 @@ void loop() {
   float porcentagemAtual = (volumeAtual / capacidadeTanque) * 100;
   nivelAtualIndex = descobrirNivelAtual(porcentagemAtual);
 
-  // --- BOTÕES DE NÍVEL ---
+  // --- Botões de nível ---
   for (int i = 0; i < 5; i++) {
     if (digitalRead(botoes[i]) == LOW) {
       float alvoTemp = capacidadeTanque * niveis[i];
 
       if (manualAtivo) {
-        // Modo manual: qualquer nível permitido
         volumeAlvo = alvoTemp;
+        ultimoNivelValido = i;
+        subindo = (volumeAlvo > volumeAtual);
       } else {
-        // Modo automático: só permite subir/descendo 1 nível
         if (i == nivelAtualIndex + 1 || i == nivelAtualIndex - 1) {
           volumeAlvo = alvoTemp;
+          ultimoNivelValido = i;
+          subindo = (volumeAlvo > volumeAtual);
         } else if (i != nivelAtualIndex) {
-          // Tentou pular nível → mostrar erro
+          // Não permite pular nível
+          volumeAlvo = capacidadeTanque * niveis[ultimoNivelValido];
           erroAtivo = true;
           tempoErro = millis();
         }
       }
 
-      // Limitar volumeAlvo
       if (volumeAlvo > volumeMax) volumeAlvo = volumeMax;
       if (volumeAlvo < volumeMin) volumeAlvo = volumeMin;
     }
   }
 
-  // --- MOVIMENTO ---
+  // --- Movimento ---
   if (millis() - tempoAnterior > 50) {
     tempoAnterior = millis();
 
     if (volumeAtual < volumeAlvo) {
       volumeAtual += passo;
       bombaServo.write(180);
-    } 
-    else if (volumeAtual > volumeAlvo) {
+      subindo = true;
+    } else if (volumeAtual > volumeAlvo) {
       volumeAtual -= passo;
       bombaServo.write(45);
-    } 
-    else {
+      subindo = false;
+    } else {
       bombaServo.write(0);
     }
 
-    // TRAVAS
     if (volumeAtual > volumeMax) volumeAtual = volumeMax;
     if (volumeAtual < volumeMin) volumeAtual = volumeMin;
 
+    // Arredondar para múltiplos de 10
+    volumeAtual = arredondar10(volumeAtual);
+
+    // Salva volume e direção
     EEPROM.put(0, volumeAtual);
+    EEPROM.put(4, subindo);
   }
 
-  // --- LEDS INVERTIDOS ---
+  // --- LEDs invertidos ---
   for (int i = 0; i < 5; i++) {
     int ledIndex = 4 - i;
     float limite = capacidadeTanque * niveis[i];
 
     if (i == 0 && porcentagemAtual <= 10.0) {
       digitalWrite(leds[ledIndex], estadoPisca);
-    }
-    else if (i == 4 && porcentagemAtual >= 90.0) {
+    } else if (i == 4 && porcentagemAtual >= 90.0) {
       digitalWrite(leds[ledIndex], estadoPisca);
-    }
-    else {
+    } else {
       digitalWrite(leds[ledIndex], (volumeAtual >= limite) ? HIGH : LOW);
     }
   }
@@ -153,15 +188,13 @@ void loop() {
   // --- LCD ---
   lcd.setCursor(0, 0);
   if (erroAtivo) {
-    lcd.print("     !ERRO!        ");
-    if (millis() - tempoErro > 2000) {
-      erroAtivo = false;
-    }
+    lcd.print("     !ERRO!           ");
+    if (millis() - tempoErro > 2000) erroAtivo = false;
   } else {
     lcd.print("Nivel: ");
     lcd.print(nivelAtualIndex + 1);
     if (manualAtivo) lcd.print(" Manual");
-    else lcd.print("       ");
+    else lcd.print("             ");
   }
 
   lcd.setCursor(0, 1);
