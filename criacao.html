@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitoramento IoT - Alerta Mobile</title>
+    <style>
+        /* Centralização e Layout */
+        html, body {
+            height: 100%; margin: 0; background: #1e272e;
+            display: flex; justify-content: center; align-items: center;
+            font-family: 'Segoe UI', sans-serif; overflow: hidden;
+        }
+
+        .main-container {
+            display: flex; align-items: center; gap: 50px;
+            transition: all 0.5s ease;
+        }
+
+        /* Painel Industrial (O que fica no centro) */
+        .panel {
+            background: white; padding: 40px; border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+            display: flex; gap: 40px; align-items: center;
+        }
+
+        /* Estilo LCD */
+        .lcd {
+            background: #222; padding: 10px; border-radius: 8px; margin-bottom: 15px;
+        }
+        .lcd-screen {
+            background: #0033cc; color: #fff; width: 200px; height: 50px;
+            padding: 8px; font-family: 'Courier New', monospace; font-size: 0.9em;
+            display: flex; flex-direction: column; justify-content: center;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        /* Tanque */
+        .tanque {
+            width: 120px; height: 250px; border: 5px solid #333;
+            border-top: none; border-radius: 0 0 15px 15px;
+            background: #eee; position: relative; overflow: hidden;
+        }
+        .agua {
+            position: absolute; bottom: 0; width: 100%; background: #3498db;
+            transition: height 1s ease; display: flex; align-items: center;
+            justify-content: center; color: white; font-weight: bold; font-size: 14px;
+        }
+
+        /* O CELULAR (Invisível por padrão) */
+        .smartphone {
+            width: 200px; height: 400px; background: #000;
+            border: 4px solid #444; border-radius: 25px;
+            position: relative; opacity: 0; transform: translateX(100px);
+            transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex; flex-direction: column; padding: 10px;
+        }
+
+        .smartphone.show {
+            opacity: 1; transform: translateX(0);
+        }
+
+        .phone-screen {
+            flex: 1; background: #fff; border-radius: 18px;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; padding: 15px; text-align: center;
+        }
+
+        .notificacao {
+            background: #ff4757; color: white; padding: 10px;
+            border-radius: 10px; font-weight: bold; font-size: 11px;
+            animation: shake 0.5s infinite;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: rotate(0); }
+            25% { transform: rotate(5deg); }
+            75% { transform: rotate(-5deg); }
+        }
+
+        /* Controles */
+        .btn {
+            padding: 10px; border: none; border-radius: 5px; cursor: pointer;
+            width: 100%; font-weight: bold; margin-bottom: 10px;
+        }
+        .btn-auto { background: #27ae60; color: white; }
+        .btn-manual { background: #f39c12; color: white; }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <div class="panel">
+            <div>
+                <div class="tanque">
+                    <div id="agua" class="agua" style="height: 50%;">50%</div>
+                </div>
+            </div>
+
+            <div style="min-width: 200px;">
+                <div class="lcd">
+                    <div class="lcd-screen">
+                        <div id="l1">Nivel: 3</div>
+                        <div id="l2">Vol:5000 A:10L</div>
+                    </div>
+                </div>
+
+                <button id="btnMode" class="btn btn-auto" onclick="toggle()">MODO AUTOMÁTICO</button>
+                
+                <div id="manualPanel" style="display:none;">
+                    <input type="range" min="10" max="90" value="50" style="width:100%" oninput="update(this.value)">
+                </div>
+                <p style="color: #888; font-size: 10px; text-align: center;">Segurança: Trava 10% - 90%</p>
+            </div>
+        </div>
+
+        <div id="phone" class="smartphone">
+            <div style="width: 30px; height: 4px; background: #333; margin: 5px auto; border-radius: 10px;"></div>
+            <div class="phone-screen">
+                <div class="notificacao">
+                    ⚠️ ALERTA IOT<br>NÍVEL CRÍTICO DETECTADO!
+                </div>
+                <p style="font-size: 10px; margin-top: 20px; color: #666;">O sistema interrompeu o fluxo automaticamente para segurança.</p>
+                <img src="https://cdn-icons-png.flaticon.com/512/564/564619.png" width="40" style="margin-top: 10px; opacity: 0.5;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let auto = true;
+        let timer;
+
+        function update(v) {
+            // Trava rígida
+            if (v > 90) v = 90;
+            if (v < 10) v = 10;
+
+            const agua = document.getElementById('agua');
+            const l1 = document.getElementById('l1');
+            const l2 = document.getElementById('l2');
+            const phone = document.getElementById('phone');
+
+            // Atualiza Dashboard
+            agua.style.height = v + '%';
+            agua.innerText = v + '%';
+            
+            let n = 1;
+            if (v >= 90) n = 5;
+            else if (v >= 70) n = 4;
+            else if (v >= 50) n = 3;
+            else if (v >= 30) n = 2;
+
+            l1.innerText = `Nivel: ${n}`;
+            l2.innerText = `Vol:${v * 100} A:10L`;
+
+            // LÓGICA DO CELULAR: Aparece se chegar nos limites
+            if (v <= 10 || v >= 90) {
+                phone.classList.add('show');
+            } else {
+                phone.classList.remove('show');
+            }
+        }
+
+        function toggle() {
+            auto = !auto;
+            const btn = document.getElementById('btnMode');
+            const manual = document.getElementById('manualPanel');
+            if(auto) {
+                btn.innerText = "MODO AUTOMÁTICO";
+                btn.className = "btn btn-auto";
+                manual.style.display = "none";
+                start();
+            } else {
+                btn.innerText = "MODO MANUAL";
+                btn.className = "btn btn-manual";
+                manual.style.display = "block";
+                clearInterval(timer);
+            }
+        }
+
+        function start() {
+            timer = setInterval(() => {
+                let r = Math.floor(Math.random() * (90 - 10 + 1)) + 10;
+                update(r);
+            }, 3000);
+        }
+
+        start();
+    </script>
+</body>
+</html>
